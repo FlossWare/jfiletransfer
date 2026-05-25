@@ -1,12 +1,24 @@
 package org.flossware.filetransfer;
 
+import com.github.sardine.DavResource;
+import com.github.sardine.Sardine;
+import com.github.sardine.SardineFactory;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.DisplayName;
+import org.mockito.MockedStatic;
 
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.lang.reflect.Method;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
 
 /**
  * Comprehensive tests for WebDavFileTransferClient to achieve 100% coverage.
@@ -301,6 +313,344 @@ class WebDavFileTransferClientTest {
         String description = client.getDescription();
         // Empty strings are not null, so authenticated should be true
         assertTrue(description.contains("authenticated=true"));
+    }
+
+    // Tests for actual WebDAV operations using mocked Sardine
+
+    @Test
+    @DisplayName("Should read file successfully")
+    void testReadFileSuccess() throws Exception {
+        byte[] fileContent = "test file content".getBytes();
+        ByteArrayInputStream inputStream = new ByteArrayInputStream(fileContent);
+
+        try (MockedStatic<SardineFactory> factoryMock = mockStatic(SardineFactory.class)) {
+            Sardine sardine = mock(Sardine.class);
+            factoryMock.when(() -> SardineFactory.begin(anyString(), anyString())).thenReturn(sardine);
+            when(sardine.get(anyString())).thenReturn(inputStream);
+
+            client = WebDavFileTransferClient.builder()
+                .baseUrl("https://webdav.example.com/files/")
+                .username("user")
+                .password("pass")
+                .build();
+
+            byte[] result = client.readFile("test.txt");
+            assertArrayEquals(fileContent, result);
+            verify(sardine).get("https://webdav.example.com/files/test.txt");
+        }
+    }
+
+    @Test
+    @DisplayName("Should throw IOException when readFile fails")
+    void testReadFileFailure() throws Exception {
+        try (MockedStatic<SardineFactory> factoryMock = mockStatic(SardineFactory.class)) {
+            Sardine sardine = mock(Sardine.class);
+            factoryMock.when(() -> SardineFactory.begin(anyString(), anyString())).thenReturn(sardine);
+            when(sardine.get(anyString())).thenThrow(new IOException("File not found"));
+
+            client = WebDavFileTransferClient.builder()
+                .baseUrl("https://webdav.example.com/")
+                .username("user")
+                .password("pass")
+                .build();
+
+            IOException thrown = assertThrows(IOException.class, () -> client.readFile("missing.txt"));
+            assertTrue(thrown.getMessage().contains("File not found"));
+        }
+    }
+
+    @Test
+    @DisplayName("Should open file successfully")
+    void testOpenFileSuccess() throws Exception {
+        ByteArrayInputStream inputStream = new ByteArrayInputStream("test".getBytes());
+
+        try (MockedStatic<SardineFactory> factoryMock = mockStatic(SardineFactory.class)) {
+            Sardine sardine = mock(Sardine.class);
+            factoryMock.when(() -> SardineFactory.begin(anyString(), anyString())).thenReturn(sardine);
+            when(sardine.get(anyString())).thenReturn(inputStream);
+
+            client = WebDavFileTransferClient.builder()
+                .baseUrl("https://webdav.example.com/files/")
+                .username("user")
+                .password("pass")
+                .build();
+
+            InputStream result = client.openFile("test.txt");
+            assertSame(inputStream, result);
+        }
+    }
+
+    @Test
+    @DisplayName("Should throw IOException when openFile fails")
+    void testOpenFileFailure() throws Exception {
+        try (MockedStatic<SardineFactory> factoryMock = mockStatic(SardineFactory.class)) {
+            Sardine sardine = mock(Sardine.class);
+            factoryMock.when(() -> SardineFactory.begin()).thenReturn(sardine);
+            when(sardine.get(anyString())).thenThrow(new IOException("Cannot open file"));
+
+            client = WebDavFileTransferClient.builder()
+                .baseUrl("https://webdav.example.com/")
+                .build();
+
+            IOException thrown = assertThrows(IOException.class, () -> client.openFile("test.txt"));
+            assertTrue(thrown.getMessage().contains("Cannot open file"));
+        }
+    }
+
+    @Test
+    @DisplayName("Should return true when file exists")
+    void testExistsTrue() throws Exception {
+        try (MockedStatic<SardineFactory> factoryMock = mockStatic(SardineFactory.class)) {
+            Sardine sardine = mock(Sardine.class);
+            factoryMock.when(() -> SardineFactory.begin()).thenReturn(sardine);
+            when(sardine.exists(anyString())).thenReturn(true);
+
+            client = WebDavFileTransferClient.builder()
+                .baseUrl("https://webdav.example.com/")
+                .build();
+
+            assertTrue(client.exists("test.txt"));
+            verify(sardine).exists("https://webdav.example.com/test.txt");
+        }
+    }
+
+    @Test
+    @DisplayName("Should return false when file does not exist")
+    void testExistsFalse() throws Exception {
+        try (MockedStatic<SardineFactory> factoryMock = mockStatic(SardineFactory.class)) {
+            Sardine sardine = mock(Sardine.class);
+            factoryMock.when(() -> SardineFactory.begin(anyString(), anyString())).thenReturn(sardine);
+            when(sardine.exists(anyString())).thenReturn(false);
+
+            client = WebDavFileTransferClient.builder()
+                .baseUrl("https://webdav.example.com/files/")
+                .username("user")
+                .password("pass")
+                .build();
+
+            assertFalse(client.exists("missing.txt"));
+        }
+    }
+
+    @Test
+    @DisplayName("Should list files successfully")
+    void testListSuccess() throws Exception {
+        try (MockedStatic<SardineFactory> factoryMock = mockStatic(SardineFactory.class)) {
+            Sardine sardine = mock(Sardine.class);
+            factoryMock.when(() -> SardineFactory.begin()).thenReturn(sardine);
+
+            DavResource dir = mock(DavResource.class);
+            DavResource file1 = mock(DavResource.class);
+            DavResource file2 = mock(DavResource.class);
+
+            when(dir.getPath()).thenReturn("uploads/");
+            when(file1.getPath()).thenReturn("/uploads/file1.txt");
+            when(file2.getPath()).thenReturn("/uploads/file2.txt");
+
+            List<DavResource> resources = new ArrayList<>();
+            resources.add(dir);
+            resources.add(file1);
+            resources.add(file2);
+
+            when(sardine.list(anyString())).thenReturn(resources);
+
+            client = WebDavFileTransferClient.builder()
+                .baseUrl("https://webdav.example.com/")
+                .build();
+
+            List<String> result = client.list("uploads/");
+            assertEquals(2, result.size());
+            assertTrue(result.contains("uploads/file1.txt"));
+            assertTrue(result.contains("uploads/file2.txt"));
+        }
+    }
+
+    @Test
+    @DisplayName("Should filter directory itself from list results")
+    void testListFilterDirectory() throws Exception {
+        try (MockedStatic<SardineFactory> factoryMock = mockStatic(SardineFactory.class)) {
+            Sardine sardine = mock(Sardine.class);
+            factoryMock.when(() -> SardineFactory.begin(anyString(), anyString())).thenReturn(sardine);
+
+            DavResource dir = mock(DavResource.class);
+            when(dir.getPath()).thenReturn("docs");
+
+            List<DavResource> resources = Collections.singletonList(dir);
+            when(sardine.list(anyString())).thenReturn(resources);
+
+            client = WebDavFileTransferClient.builder()
+                .baseUrl("https://webdav.example.com/")
+                .username("user")
+                .password("pass")
+                .build();
+
+            List<String> result = client.list("docs");
+            assertTrue(result.isEmpty());
+        }
+    }
+
+    @Test
+    @DisplayName("Should handle paths without leading slash")
+    void testListPathNormalization() throws Exception {
+        try (MockedStatic<SardineFactory> factoryMock = mockStatic(SardineFactory.class)) {
+            Sardine sardine = mock(Sardine.class);
+            factoryMock.when(() -> SardineFactory.begin()).thenReturn(sardine);
+
+            DavResource file = mock(DavResource.class);
+            when(file.getPath()).thenReturn("uploads/file.txt");
+
+            List<DavResource> resources = Collections.singletonList(file);
+            when(sardine.list(anyString())).thenReturn(resources);
+
+            client = WebDavFileTransferClient.builder()
+                .baseUrl("https://webdav.example.com/")
+                .build();
+
+            List<String> result = client.list("uploads");
+            assertEquals(1, result.size());
+            assertEquals("uploads/file.txt", result.get(0));
+        }
+    }
+
+    @Test
+    @DisplayName("Should throw IOException when list fails")
+    void testListFailure() throws Exception {
+        try (MockedStatic<SardineFactory> factoryMock = mockStatic(SardineFactory.class)) {
+            Sardine sardine = mock(Sardine.class);
+            factoryMock.when(() -> SardineFactory.begin()).thenReturn(sardine);
+            when(sardine.list(anyString())).thenThrow(new IOException("Directory not found"));
+
+            client = WebDavFileTransferClient.builder()
+                .baseUrl("https://webdav.example.com/")
+                .build();
+
+            IOException thrown = assertThrows(IOException.class, () -> client.list("missing"));
+            assertTrue(thrown.getMessage().contains("Directory not found"));
+        }
+    }
+
+    @Test
+    @DisplayName("Should get file size successfully")
+    void testGetFileSizeSuccess() throws Exception {
+        try (MockedStatic<SardineFactory> factoryMock = mockStatic(SardineFactory.class)) {
+            Sardine sardine = mock(Sardine.class);
+            factoryMock.when(() -> SardineFactory.begin(anyString(), anyString())).thenReturn(sardine);
+
+            DavResource resource = mock(DavResource.class);
+            when(resource.isDirectory()).thenReturn(false);
+            when(resource.getContentLength()).thenReturn(12345L);
+
+            List<DavResource> resources = Collections.singletonList(resource);
+            when(sardine.list(anyString())).thenReturn(resources);
+
+            client = WebDavFileTransferClient.builder()
+                .baseUrl("https://webdav.example.com/")
+                .username("user")
+                .password("pass")
+                .build();
+
+            assertEquals(12345L, client.getFileSize("test.txt"));
+        }
+    }
+
+    @Test
+    @DisplayName("Should throw IOException when file not found for size")
+    void testGetFileSizeNotFound() throws Exception {
+        try (MockedStatic<SardineFactory> factoryMock = mockStatic(SardineFactory.class)) {
+            Sardine sardine = mock(Sardine.class);
+            factoryMock.when(() -> SardineFactory.begin()).thenReturn(sardine);
+            when(sardine.list(anyString())).thenReturn(Collections.emptyList());
+
+            client = WebDavFileTransferClient.builder()
+                .baseUrl("https://webdav.example.com/")
+                .build();
+
+            IOException thrown = assertThrows(IOException.class, () -> client.getFileSize("missing.txt"));
+            assertTrue(thrown.getMessage().contains("File not found"));
+        }
+    }
+
+    @Test
+    @DisplayName("Should throw IOException when getting size of directory")
+    void testGetFileSizeDirectory() throws Exception {
+        try (MockedStatic<SardineFactory> factoryMock = mockStatic(SardineFactory.class)) {
+            Sardine sardine = mock(Sardine.class);
+            factoryMock.when(() -> SardineFactory.begin()).thenReturn(sardine);
+
+            DavResource resource = mock(DavResource.class);
+            when(resource.isDirectory()).thenReturn(true);
+
+            List<DavResource> resources = Collections.singletonList(resource);
+            when(sardine.list(anyString())).thenReturn(resources);
+
+            client = WebDavFileTransferClient.builder()
+                .baseUrl("https://webdav.example.com/")
+                .build();
+
+            IOException thrown = assertThrows(IOException.class, () -> client.getFileSize("directory"));
+            assertTrue(thrown.getMessage().contains("Path is a directory"));
+        }
+    }
+
+    @Test
+    @DisplayName("Should return 0 when content length is null")
+    void testGetFileSizeNullContentLength() throws Exception {
+        try (MockedStatic<SardineFactory> factoryMock = mockStatic(SardineFactory.class)) {
+            Sardine sardine = mock(Sardine.class);
+            factoryMock.when(() -> SardineFactory.begin(anyString(), anyString())).thenReturn(sardine);
+
+            DavResource resource = mock(DavResource.class);
+            when(resource.isDirectory()).thenReturn(false);
+            when(resource.getContentLength()).thenReturn(null);
+
+            List<DavResource> resources = Collections.singletonList(resource);
+            when(sardine.list(anyString())).thenReturn(resources);
+
+            client = WebDavFileTransferClient.builder()
+                .baseUrl("https://webdav.example.com/")
+                .username("user")
+                .password("pass")
+                .build();
+
+            assertEquals(0L, client.getFileSize("test.txt"));
+        }
+    }
+
+    @Test
+    @DisplayName("Should close and shutdown Sardine")
+    void testClose() throws Exception {
+        try (MockedStatic<SardineFactory> factoryMock = mockStatic(SardineFactory.class)) {
+            Sardine sardine = mock(Sardine.class);
+            factoryMock.when(() -> SardineFactory.begin()).thenReturn(sardine);
+            doNothing().when(sardine).shutdown();
+
+            client = WebDavFileTransferClient.builder()
+                .baseUrl("https://webdav.example.com/")
+                .build();
+
+            client.close();
+
+            verify(sardine).shutdown();
+        }
+    }
+
+    @Test
+    @DisplayName("Should propagate IOException from shutdown")
+    void testCloseError() throws Exception {
+        try (MockedStatic<SardineFactory> factoryMock = mockStatic(SardineFactory.class)) {
+            Sardine sardine = mock(Sardine.class);
+            factoryMock.when(() -> SardineFactory.begin(anyString(), anyString())).thenReturn(sardine);
+            doThrow(new IOException("Shutdown failed")).when(sardine).shutdown();
+
+            client = WebDavFileTransferClient.builder()
+                .baseUrl("https://webdav.example.com/")
+                .username("user")
+                .password("pass")
+                .build();
+
+            IOException thrown = assertThrows(IOException.class, () -> client.close());
+            assertTrue(thrown.getMessage().contains("Shutdown failed"));
+        }
     }
 
     private WebDavFileTransferClient createTestClient(String baseUrl, String username, String password) throws Exception {
