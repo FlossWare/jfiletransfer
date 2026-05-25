@@ -1,12 +1,23 @@
 package org.flossware.filetransfer;
 
+import com.jcraft.jsch.*;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.DisplayName;
+import org.mockito.MockedConstruction;
 
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.util.List;
+import java.util.Properties;
+import java.util.Vector;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
 
 /**
  * Comprehensive tests for SftpFileTransferClient to achieve 100% coverage.
@@ -372,6 +383,503 @@ class SftpFileTransferClientTest {
             "example.com", 22, "user", null, null, null, null, false);
         assertNotNull(testClient);
         testClient.close();
+    }
+
+    // Tests for actual SFTP operations using mocked JSch components
+
+    @Test
+    @DisplayName("Should read file successfully")
+    void testReadFileSuccess() throws Exception {
+        byte[] fileContent = "test file content".getBytes();
+        ByteArrayInputStream inputStream = new ByteArrayInputStream(fileContent);
+
+        try (MockedConstruction<JSch> jschMock = mockConstruction(JSch.class, (mock, context) -> {
+            Session session = mock(Session.class);
+            ChannelSftp channel = mock(ChannelSftp.class);
+
+            when(mock.getSession(anyString(), anyString(), anyInt())).thenReturn(session);
+            doNothing().when(session).setPassword(anyString());
+            doNothing().when(session).setConfig(any(Properties.class));
+            doNothing().when(session).connect(anyInt());
+            when(session.openChannel("sftp")).thenReturn(channel);
+            doNothing().when(channel).connect(anyInt());
+            when(channel.isConnected()).thenReturn(true);
+            when(channel.get(anyString())).thenReturn(inputStream);
+        })) {
+            client = SftpFileTransferClient.builder()
+                .host("example.com")
+                .username("user")
+                .password("pass")
+                .basePath("/base")
+                .build();
+
+            byte[] result = client.readFile("test.txt");
+            assertArrayEquals(fileContent, result);
+        }
+    }
+
+    @Test
+    @DisplayName("Should throw IOException when readFile fails")
+    void testReadFileFailure() throws Exception {
+        try (MockedConstruction<JSch> jschMock = mockConstruction(JSch.class, (mock, context) -> {
+            Session session = mock(Session.class);
+            ChannelSftp channel = mock(ChannelSftp.class);
+
+            when(mock.getSession(anyString(), anyString(), anyInt())).thenReturn(session);
+            doNothing().when(session).setPassword(anyString());
+            doNothing().when(session).setConfig(any(Properties.class));
+            doNothing().when(session).connect(anyInt());
+            when(session.openChannel("sftp")).thenReturn(channel);
+            doNothing().when(channel).connect(anyInt());
+            when(channel.isConnected()).thenReturn(true);
+            when(channel.get(anyString())).thenThrow(new SftpException(0, "File not found"));
+        })) {
+            client = SftpFileTransferClient.builder()
+                .host("example.com")
+                .username("user")
+                .password("pass")
+                .build();
+
+            IOException thrown = assertThrows(IOException.class, () -> client.readFile("missing.txt"));
+            assertTrue(thrown.getMessage().contains("Failed to read file from SFTP"));
+        }
+    }
+
+    @Test
+    @DisplayName("Should open file successfully")
+    void testOpenFileSuccess() throws Exception {
+        ByteArrayInputStream inputStream = new ByteArrayInputStream("test".getBytes());
+
+        try (MockedConstruction<JSch> jschMock = mockConstruction(JSch.class, (mock, context) -> {
+            Session session = mock(Session.class);
+            ChannelSftp channel = mock(ChannelSftp.class);
+
+            when(mock.getSession(anyString(), anyString(), anyInt())).thenReturn(session);
+            doNothing().when(session).setPassword(anyString());
+            doNothing().when(session).setConfig(any(Properties.class));
+            doNothing().when(session).connect(anyInt());
+            when(session.openChannel("sftp")).thenReturn(channel);
+            doNothing().when(channel).connect(anyInt());
+            when(channel.isConnected()).thenReturn(true);
+            when(channel.get(anyString())).thenReturn(inputStream);
+        })) {
+            client = SftpFileTransferClient.builder()
+                .host("example.com")
+                .username("user")
+                .password("pass")
+                .build();
+
+            InputStream result = client.openFile("test.txt");
+            assertSame(inputStream, result);
+        }
+    }
+
+    @Test
+    @DisplayName("Should throw IOException when openFile fails")
+    void testOpenFileFailure() throws Exception {
+        try (MockedConstruction<JSch> jschMock = mockConstruction(JSch.class, (mock, context) -> {
+            Session session = mock(Session.class);
+            ChannelSftp channel = mock(ChannelSftp.class);
+
+            when(mock.getSession(anyString(), anyString(), anyInt())).thenReturn(session);
+            doNothing().when(session).setPassword(anyString());
+            doNothing().when(session).setConfig(any(Properties.class));
+            doNothing().when(session).connect(anyInt());
+            when(session.openChannel("sftp")).thenReturn(channel);
+            doNothing().when(channel).connect(anyInt());
+            when(channel.isConnected()).thenReturn(true);
+            when(channel.get(anyString())).thenThrow(new SftpException(0, "Cannot open file"));
+        })) {
+            client = SftpFileTransferClient.builder()
+                .host("example.com")
+                .username("user")
+                .password("pass")
+                .build();
+
+            IOException thrown = assertThrows(IOException.class, () -> client.openFile("test.txt"));
+            assertTrue(thrown.getMessage().contains("Failed to open file from SFTP"));
+        }
+    }
+
+    @Test
+    @DisplayName("Should return true when file exists")
+    void testExistsTrue() throws Exception {
+        try (MockedConstruction<JSch> jschMock = mockConstruction(JSch.class, (mock, context) -> {
+            Session session = mock(Session.class);
+            ChannelSftp channel = mock(ChannelSftp.class);
+            SftpATTRS attrs = mock(SftpATTRS.class);
+
+            when(mock.getSession(anyString(), anyString(), anyInt())).thenReturn(session);
+            doNothing().when(session).setPassword(anyString());
+            doNothing().when(session).setConfig(any(Properties.class));
+            doNothing().when(session).connect(anyInt());
+            when(session.openChannel("sftp")).thenReturn(channel);
+            doNothing().when(channel).connect(anyInt());
+            when(channel.isConnected()).thenReturn(true);
+            when(channel.stat(anyString())).thenReturn(attrs);
+            when(attrs.isDir()).thenReturn(false);
+        })) {
+            client = SftpFileTransferClient.builder()
+                .host("example.com")
+                .username("user")
+                .password("pass")
+                .build();
+
+            assertTrue(client.exists("test.txt"));
+        }
+    }
+
+    @Test
+    @DisplayName("Should return false when file does not exist")
+    void testExistsFalse() throws Exception {
+        try (MockedConstruction<JSch> jschMock = mockConstruction(JSch.class, (mock, context) -> {
+            Session session = mock(Session.class);
+            ChannelSftp channel = mock(ChannelSftp.class);
+
+            when(mock.getSession(anyString(), anyString(), anyInt())).thenReturn(session);
+            doNothing().when(session).setPassword(anyString());
+            doNothing().when(session).setConfig(any(Properties.class));
+            doNothing().when(session).connect(anyInt());
+            when(session.openChannel("sftp")).thenReturn(channel);
+            doNothing().when(channel).connect(anyInt());
+            when(channel.isConnected()).thenReturn(true);
+            when(channel.stat(anyString())).thenThrow(new SftpException(ChannelSftp.SSH_FX_NO_SUCH_FILE, "No such file"));
+        })) {
+            client = SftpFileTransferClient.builder()
+                .host("example.com")
+                .username("user")
+                .password("pass")
+                .build();
+
+            assertFalse(client.exists("missing.txt"));
+        }
+    }
+
+    @Test
+    @DisplayName("Should return false when path is directory")
+    void testExistsDirectory() throws Exception {
+        try (MockedConstruction<JSch> jschMock = mockConstruction(JSch.class, (mock, context) -> {
+            Session session = mock(Session.class);
+            ChannelSftp channel = mock(ChannelSftp.class);
+            SftpATTRS attrs = mock(SftpATTRS.class);
+
+            when(mock.getSession(anyString(), anyString(), anyInt())).thenReturn(session);
+            doNothing().when(session).setPassword(anyString());
+            doNothing().when(session).setConfig(any(Properties.class));
+            doNothing().when(session).connect(anyInt());
+            when(session.openChannel("sftp")).thenReturn(channel);
+            doNothing().when(channel).connect(anyInt());
+            when(channel.isConnected()).thenReturn(true);
+            when(channel.stat(anyString())).thenReturn(attrs);
+            when(attrs.isDir()).thenReturn(true);
+        })) {
+            client = SftpFileTransferClient.builder()
+                .host("example.com")
+                .username("user")
+                .password("pass")
+                .build();
+
+            assertFalse(client.exists("directory"));
+        }
+    }
+
+    @Test
+    @DisplayName("Should throw IOException when exists check fails with unexpected error")
+    void testExistsError() throws Exception {
+        try (MockedConstruction<JSch> jschMock = mockConstruction(JSch.class, (mock, context) -> {
+            Session session = mock(Session.class);
+            ChannelSftp channel = mock(ChannelSftp.class);
+
+            when(mock.getSession(anyString(), anyString(), anyInt())).thenReturn(session);
+            doNothing().when(session).setPassword(anyString());
+            doNothing().when(session).setConfig(any(Properties.class));
+            doNothing().when(session).connect(anyInt());
+            when(session.openChannel("sftp")).thenReturn(channel);
+            doNothing().when(channel).connect(anyInt());
+            when(channel.isConnected()).thenReturn(true);
+            when(channel.stat(anyString())).thenThrow(new SftpException(5, "Permission denied"));
+        })) {
+            client = SftpFileTransferClient.builder()
+                .host("example.com")
+                .username("user")
+                .password("pass")
+                .build();
+
+            IOException thrown = assertThrows(IOException.class, () -> client.exists("test.txt"));
+            assertTrue(thrown.getMessage().contains("Failed to check file existence"));
+        }
+    }
+
+    @Test
+    @DisplayName("Should list files successfully")
+    void testListSuccess() throws Exception {
+        try (MockedConstruction<JSch> jschMock = mockConstruction(JSch.class, (mock, context) -> {
+            Session session = mock(Session.class);
+            ChannelSftp channel = mock(ChannelSftp.class);
+
+            Vector<ChannelSftp.LsEntry> entries = new Vector<>();
+            ChannelSftp.LsEntry entry1 = mock(ChannelSftp.LsEntry.class);
+            ChannelSftp.LsEntry entry2 = mock(ChannelSftp.LsEntry.class);
+            ChannelSftp.LsEntry dotEntry = mock(ChannelSftp.LsEntry.class);
+            ChannelSftp.LsEntry dotDotEntry = mock(ChannelSftp.LsEntry.class);
+
+            when(entry1.getFilename()).thenReturn("file1.txt");
+            when(entry2.getFilename()).thenReturn("file2.txt");
+            when(dotEntry.getFilename()).thenReturn(".");
+            when(dotDotEntry.getFilename()).thenReturn("..");
+
+            entries.add(dotEntry);
+            entries.add(dotDotEntry);
+            entries.add(entry1);
+            entries.add(entry2);
+
+            when(mock.getSession(anyString(), anyString(), anyInt())).thenReturn(session);
+            doNothing().when(session).setPassword(anyString());
+            doNothing().when(session).setConfig(any(Properties.class));
+            doNothing().when(session).connect(anyInt());
+            when(session.openChannel("sftp")).thenReturn(channel);
+            doNothing().when(channel).connect(anyInt());
+            when(channel.isConnected()).thenReturn(true);
+            when(channel.ls(anyString())).thenReturn(entries);
+        })) {
+            client = SftpFileTransferClient.builder()
+                .host("example.com")
+                .username("user")
+                .password("pass")
+                .basePath("/base")
+                .build();
+
+            List<String> result = client.list("uploads");
+            assertEquals(2, result.size());
+            assertTrue(result.contains("uploads/file1.txt"));
+            assertTrue(result.contains("uploads/file2.txt"));
+        }
+    }
+
+    @Test
+    @DisplayName("Should list files with trailing slash in prefix")
+    void testListWithTrailingSlash() throws Exception {
+        try (MockedConstruction<JSch> jschMock = mockConstruction(JSch.class, (mock, context) -> {
+            Session session = mock(Session.class);
+            ChannelSftp channel = mock(ChannelSftp.class);
+
+            Vector<ChannelSftp.LsEntry> entries = new Vector<>();
+            ChannelSftp.LsEntry entry = mock(ChannelSftp.LsEntry.class);
+            when(entry.getFilename()).thenReturn("file.txt");
+            entries.add(entry);
+
+            when(mock.getSession(anyString(), anyString(), anyInt())).thenReturn(session);
+            doNothing().when(session).setPassword(anyString());
+            doNothing().when(session).setConfig(any(Properties.class));
+            doNothing().when(session).connect(anyInt());
+            when(session.openChannel("sftp")).thenReturn(channel);
+            doNothing().when(channel).connect(anyInt());
+            when(channel.isConnected()).thenReturn(true);
+            when(channel.ls(anyString())).thenReturn(entries);
+        })) {
+            client = SftpFileTransferClient.builder()
+                .host("example.com")
+                .username("user")
+                .password("pass")
+                .build();
+
+            List<String> result = client.list("uploads/");
+            assertEquals(1, result.size());
+            assertEquals("uploads/file.txt", result.get(0));
+        }
+    }
+
+    @Test
+    @DisplayName("Should throw IOException when list fails")
+    void testListFailure() throws Exception {
+        try (MockedConstruction<JSch> jschMock = mockConstruction(JSch.class, (mock, context) -> {
+            Session session = mock(Session.class);
+            ChannelSftp channel = mock(ChannelSftp.class);
+
+            when(mock.getSession(anyString(), anyString(), anyInt())).thenReturn(session);
+            doNothing().when(session).setPassword(anyString());
+            doNothing().when(session).setConfig(any(Properties.class));
+            doNothing().when(session).connect(anyInt());
+            when(session.openChannel("sftp")).thenReturn(channel);
+            doNothing().when(channel).connect(anyInt());
+            when(channel.isConnected()).thenReturn(true);
+            when(channel.ls(anyString())).thenThrow(new SftpException(0, "Directory not found"));
+        })) {
+            client = SftpFileTransferClient.builder()
+                .host("example.com")
+                .username("user")
+                .password("pass")
+                .build();
+
+            IOException thrown = assertThrows(IOException.class, () -> client.list("missing"));
+            assertTrue(thrown.getMessage().contains("Failed to list files from SFTP"));
+        }
+    }
+
+    @Test
+    @DisplayName("Should get file size successfully")
+    void testGetFileSizeSuccess() throws Exception {
+        try (MockedConstruction<JSch> jschMock = mockConstruction(JSch.class, (mock, context) -> {
+            Session session = mock(Session.class);
+            ChannelSftp channel = mock(ChannelSftp.class);
+            SftpATTRS attrs = mock(SftpATTRS.class);
+
+            when(mock.getSession(anyString(), anyString(), anyInt())).thenReturn(session);
+            doNothing().when(session).setPassword(anyString());
+            doNothing().when(session).setConfig(any(Properties.class));
+            doNothing().when(session).connect(anyInt());
+            when(session.openChannel("sftp")).thenReturn(channel);
+            doNothing().when(channel).connect(anyInt());
+            when(channel.isConnected()).thenReturn(true);
+            when(channel.stat(anyString())).thenReturn(attrs);
+            when(attrs.isDir()).thenReturn(false);
+            when(attrs.getSize()).thenReturn(12345L);
+        })) {
+            client = SftpFileTransferClient.builder()
+                .host("example.com")
+                .username("user")
+                .password("pass")
+                .build();
+
+            assertEquals(12345L, client.getFileSize("test.txt"));
+        }
+    }
+
+    @Test
+    @DisplayName("Should throw IOException when getting size of directory")
+    void testGetFileSizeDirectory() throws Exception {
+        try (MockedConstruction<JSch> jschMock = mockConstruction(JSch.class, (mock, context) -> {
+            Session session = mock(Session.class);
+            ChannelSftp channel = mock(ChannelSftp.class);
+            SftpATTRS attrs = mock(SftpATTRS.class);
+
+            when(mock.getSession(anyString(), anyString(), anyInt())).thenReturn(session);
+            doNothing().when(session).setPassword(anyString());
+            doNothing().when(session).setConfig(any(Properties.class));
+            doNothing().when(session).connect(anyInt());
+            when(session.openChannel("sftp")).thenReturn(channel);
+            doNothing().when(channel).connect(anyInt());
+            when(channel.isConnected()).thenReturn(true);
+            when(channel.stat(anyString())).thenReturn(attrs);
+            when(attrs.isDir()).thenReturn(true);
+        })) {
+            client = SftpFileTransferClient.builder()
+                .host("example.com")
+                .username("user")
+                .password("pass")
+                .build();
+
+            IOException thrown = assertThrows(IOException.class, () -> client.getFileSize("directory"));
+            assertTrue(thrown.getMessage().contains("Path is not a file"));
+        }
+    }
+
+    @Test
+    @DisplayName("Should throw IOException when getFileSize fails")
+    void testGetFileSizeFailure() throws Exception {
+        try (MockedConstruction<JSch> jschMock = mockConstruction(JSch.class, (mock, context) -> {
+            Session session = mock(Session.class);
+            ChannelSftp channel = mock(ChannelSftp.class);
+
+            when(mock.getSession(anyString(), anyString(), anyInt())).thenReturn(session);
+            doNothing().when(session).setPassword(anyString());
+            doNothing().when(session).setConfig(any(Properties.class));
+            doNothing().when(session).connect(anyInt());
+            when(session.openChannel("sftp")).thenReturn(channel);
+            doNothing().when(channel).connect(anyInt());
+            when(channel.isConnected()).thenReturn(true);
+            when(channel.stat(anyString())).thenThrow(new SftpException(0, "File not found"));
+        })) {
+            client = SftpFileTransferClient.builder()
+                .host("example.com")
+                .username("user")
+                .password("pass")
+                .build();
+
+            IOException thrown = assertThrows(IOException.class, () -> client.getFileSize("missing.txt"));
+            assertTrue(thrown.getMessage().contains("Failed to get file size"));
+        }
+    }
+
+    @Test
+    @DisplayName("Should close connected client successfully")
+    void testCloseConnected() throws Exception {
+        client = SftpFileTransferClient.builder()
+            .host("example.com")
+            .username("user")
+            .password("pass")
+            .build();
+
+        // Inject mocked session and channel to test close
+        Session mockSession = mock(Session.class);
+        ChannelSftp mockChannel = mock(ChannelSftp.class);
+
+        when(mockSession.isConnected()).thenReturn(true);
+        when(mockChannel.isConnected()).thenReturn(true);
+
+        Field sessionField = SftpFileTransferClient.class.getDeclaredField("session");
+        sessionField.setAccessible(true);
+        sessionField.set(client, mockSession);
+
+        Field channelField = SftpFileTransferClient.class.getDeclaredField("sftpChannel");
+        channelField.setAccessible(true);
+        channelField.set(client, mockChannel);
+
+        client.close();
+
+        verify(mockChannel).disconnect();
+        verify(mockSession).disconnect();
+    }
+
+    @Test
+    @DisplayName("Should throw IOException when connection fails")
+    void testConnectionFailure() throws Exception {
+        try (MockedConstruction<JSch> jschMock = mockConstruction(JSch.class, (mock, context) -> {
+            when(mock.getSession(anyString(), anyString(), anyInt())).thenThrow(new JSchException("Connection refused"));
+        })) {
+            client = SftpFileTransferClient.builder()
+                .host("example.com")
+                .username("user")
+                .password("pass")
+                .build();
+
+            IOException thrown = assertThrows(IOException.class, () -> client.readFile("test.txt"));
+            assertTrue(thrown.getMessage().contains("Failed to connect to SFTP server"));
+        }
+    }
+
+    @Test
+    @DisplayName("Should reuse existing connection")
+    void testReuseConnection() throws Exception {
+        try (MockedConstruction<JSch> jschMock = mockConstruction(JSch.class, (mock, context) -> {
+            Session session = mock(Session.class);
+            ChannelSftp channel = mock(ChannelSftp.class);
+            ByteArrayInputStream inputStream1 = new ByteArrayInputStream("file1".getBytes());
+            ByteArrayInputStream inputStream2 = new ByteArrayInputStream("file2".getBytes());
+
+            when(mock.getSession(anyString(), anyString(), anyInt())).thenReturn(session);
+            doNothing().when(session).setPassword(anyString());
+            doNothing().when(session).setConfig(any(Properties.class));
+            doNothing().when(session).connect(anyInt());
+            when(session.openChannel("sftp")).thenReturn(channel);
+            doNothing().when(channel).connect(anyInt());
+            when(channel.isConnected()).thenReturn(true);
+            when(channel.get("/base/file1.txt")).thenReturn(inputStream1);
+            when(channel.get("/base/file2.txt")).thenReturn(inputStream2);
+        })) {
+            client = SftpFileTransferClient.builder()
+                .host("example.com")
+                .username("user")
+                .password("pass")
+                .basePath("/base")
+                .build();
+
+            client.readFile("file1.txt");
+            client.readFile("file2.txt");
+
+            // Should only create one JSch instance (connection reused)
+            assertEquals(1, jschMock.constructed().size());
+        }
     }
 
     private SftpFileTransferClient createTestClient(String password, String privateKeyPath, String basePath) throws Exception {
